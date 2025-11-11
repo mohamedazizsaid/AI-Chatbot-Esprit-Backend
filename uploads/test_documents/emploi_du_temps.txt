@@ -1,0 +1,35 @@
+EMPLOI DU TEMPS - LICENCE INFORMATIQUE
+Semestre 1 - Année 2024/2025
+
+LUNDI
+08h00-10h00 : Programmation Python - Salle A101 - Prof. Ahmed Ben Salem
+10h15-12h15 : Mathématiques - Salle A102 - Prof. Leila Khiari
+14h00-16h00 : TP Python - Lab Info 1
+
+MARDI
+08h00-10h00 : Base de données - Salle B201 - Prof. Mohamed Trabelsi
+10h15-12h15 : Anglais technique - Salle C301 - Prof. Sarah Johnson
+14h00-17h00 : Projet Base de données - Lab Info 2
+
+MERCREDI
+08h00-10h00 : Algorithmique - Salle A103 - Prof. Fatma Bouazizi
+10h15-12h15 : Système d'exploitation - Salle A104 - Prof. Karim Messaoudi
+14h00-16h00 : TP Système - Lab Info 3
+
+JEUDI
+08h00-10h00 : Réseaux informatiques - Salle B202 - Prof. Nadia Chakroun
+10h15-12h15 : Développement Web - Salle A105 - Prof. Youssef Gharbi
+14h00-17h00 : Projet Web - Lab Info 1
+
+VENDREDI
+08h00-10h00 : Architecture des ordinateurs - Salle A106 - Prof. Slim Hadj Ali
+10h15-12h15 : Gestion de projet - Salle C302 - Prof. Ines Ferchichi
+
+EXAMENS
+Python : 15 Décembre 2024 - 09h00 - Amphi 1
+Mathématiques : 18 Décembre 2024 - 09h00 - Amphi 2
+Base de données : 20 Décembre 2024 - 14h00 - Amphi 1
+Algorithmique : 22 Décembre 2024 - 09h00 - Amphi 3
+
+CONTACTS
+Secrétariat : secretariat@faculte.tn - Tél: 71 123 456
