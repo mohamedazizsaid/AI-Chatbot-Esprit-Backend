@@ -1,262 +1,217 @@
-import sqlite3
-from datetime import datetime
+from pymongo import MongoClient
+from datetime import datetime, timedelta
 from typing import Optional, List, Dict
 from passlib.context import CryptContext
+import os
 
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
 class Database:
-    def __init__(self, db_path: str = "chatbot_faculte.db"):
-        self.db_path = db_path
+    def __init__(self, connection_string: str = None):
+        """
+        Initialise la connexion MongoDB
+        Par défaut: mongodb://localhost:27017/
+        """
+        if connection_string is None:
+            connection_string = os.getenv("MONGODB_URI", "mongodb://localhost:27017/")
+        
+        self.client = MongoClient(connection_string)
+        self.db = self.client["chatbot_faculte"]
+        
+        # Collections
+        self.users = self.db["users"]
+        self.documents = self.db["documents"]
+        self.conversations = self.db["conversations"]
+        self.messages = self.db["messages"]
+        
         self.init_database()
         self.create_default_admin()
     
-    def get_connection(self):
-        """Crée une connexion à la base de données"""
-        conn = sqlite3.connect(self.db_path)
-        conn.row_factory = sqlite3.Row
-        return conn
-    
     def init_database(self):
-        """Initialise les tables de la base de données"""
-        conn = self.get_connection()
-        cursor = conn.cursor()
-        
-        # Table des utilisateurs
-        cursor.execute("""
-            CREATE TABLE IF NOT EXISTS users (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                username TEXT UNIQUE NOT NULL,
-                password_hash TEXT NOT NULL,
-                role TEXT NOT NULL,
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-            )
-        """)
-        
-        # Table des documents
-        cursor.execute("""
-            CREATE TABLE IF NOT EXISTS documents (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                filename TEXT NOT NULL,
-                file_type TEXT,
-                file_path TEXT NOT NULL,
-                status TEXT DEFAULT 'pending',
-                upload_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-            )
-        """)
-        
-        # Table des conversations
-        cursor.execute("""
-            CREATE TABLE IF NOT EXISTS conversations (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                conversation_id TEXT UNIQUE NOT NULL,
-                user_type TEXT,
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                last_activity TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-            )
-        """)
-        
-        # Table des messages
-        cursor.execute("""
-            CREATE TABLE IF NOT EXISTS messages (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                conversation_id TEXT NOT NULL,
-                role TEXT NOT NULL,
-                content TEXT NOT NULL,
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                FOREIGN KEY (conversation_id) REFERENCES conversations(conversation_id)
-            )
-        """)
-        
-        conn.commit()
-        conn.close()
+        """Initialise les indexes MongoDB"""
+        try:
+            # Index pour les utilisateurs
+            self.users.create_index("username", unique=True)
+            
+            # Index pour les conversations
+            self.conversations.create_index("conversation_id", unique=True)
+            self.conversations.create_index("last_activity")
+            
+            # Index pour les messages
+            self.messages.create_index("conversation_id")
+            self.messages.create_index("created_at")
+            
+            print("✅ Indexes MongoDB créés")
+        except Exception as e:
+            print(f"Info indexes: {e}")
     
     def create_default_admin(self):
         """Crée un utilisateur admin par défaut"""
         try:
-            conn = self.get_connection()
-            cursor = conn.cursor()
-            
             # Vérifier si un admin existe
-            cursor.execute("SELECT * FROM users WHERE role = 'admin'")
-            if cursor.fetchone() is None:
-                password_hash = pwd_context.hash("admin123")
-                cursor.execute(
-                    "INSERT INTO users (username, password_hash, role) VALUES (?, ?, ?)",
-                    ("admin", password_hash, "admin")
-                )
-                conn.commit()
-                print("Utilisateur admin créé: username='admin', password='admin123'")
+            existing_admin = self.users.find_one({"role": "admin"})
             
-            conn.close()
+            if existing_admin is None:
+                password_hash = pwd_context.hash("admin123")
+                self.users.insert_one({
+                    "username": "admin",
+                    "password_hash": password_hash,
+                    "role": "admin",
+                    "created_at": datetime.utcnow()
+                })
+                print("✅ Utilisateur admin créé: username='admin', password='admin123'")
         except Exception as e:
             print(f"Erreur création admin: {e}")
     
     # Gestion des utilisateurs
     def get_user(self, username: str) -> Optional[Dict]:
         """Récupère un utilisateur par son username"""
-        conn = self.get_connection()
-        cursor = conn.cursor()
-        cursor.execute("SELECT * FROM users WHERE username = ?", (username,))
-        row = cursor.fetchone()
-        conn.close()
-        
-        if row:
-            return dict(row)
+        user = self.users.find_one({"username": username})
+        if user:
+            user["id"] = str(user["_id"])
+            return user
         return None
     
     def create_user(self, username: str, password: str, role: str = "user"):
         """Crée un nouvel utilisateur"""
-        conn = self.get_connection()
-        cursor = conn.cursor()
-        
         password_hash = pwd_context.hash(password)
-        cursor.execute(
-            "INSERT INTO users (username, password_hash, role) VALUES (?, ?, ?)",
-            (username, password_hash, role)
-        )
-        conn.commit()
-        user_id = cursor.lastrowid
-        conn.close()
         
-        return user_id
+        result = self.users.insert_one({
+            "username": username,
+            "password_hash": password_hash,
+            "role": role,
+            "created_at": datetime.utcnow()
+        })
+        
+        return str(result.inserted_id)
     
     # Gestion des documents
     def add_document(self, filename: str, file_type: str, file_path: str, status: str = "pending"):
         """Ajoute un document"""
-        conn = self.get_connection()
-        cursor = conn.cursor()
+        result = self.documents.insert_one({
+            "filename": filename,
+            "file_type": file_type,
+            "file_path": file_path,
+            "status": status,
+            "upload_date": datetime.utcnow(),
+            "updated_at": datetime.utcnow()
+        })
         
-        cursor.execute(
-            """INSERT INTO documents (filename, file_type, file_path, status) 
-               VALUES (?, ?, ?, ?)""",
-            (filename, file_type, file_path, status)
-        )
-        conn.commit()
-        doc_id = cursor.lastrowid
-        conn.close()
-        
-        return doc_id
+        return str(result.inserted_id)
     
-    def get_document(self, doc_id: int) -> Optional[Dict]:
+    def get_document(self, doc_id: str) -> Optional[Dict]:
         """Récupère un document par son ID"""
-        conn = self.get_connection()
-        cursor = conn.cursor()
-        cursor.execute("SELECT * FROM documents WHERE id = ?", (doc_id,))
-        row = cursor.fetchone()
-        conn.close()
+        from bson.objectid import ObjectId
         
-        if row:
-            return dict(row)
+        try:
+            doc = self.documents.find_one({"_id": ObjectId(doc_id)})
+            if doc:
+                doc["id"] = str(doc["_id"])
+                return doc
+        except:
+            pass
         return None
     
     def get_all_documents(self) -> List[Dict]:
         """Récupère tous les documents"""
-        conn = self.get_connection()
-        cursor = conn.cursor()
-        cursor.execute("SELECT * FROM documents ORDER BY upload_date DESC")
-        rows = cursor.fetchall()
-        conn.close()
+        docs = list(self.documents.find().sort("upload_date", -1))
         
-        return [dict(row) for row in rows]
+        for doc in docs:
+            doc["id"] = str(doc["_id"])
+            doc["upload_date"] = doc["upload_date"].isoformat()
+            doc["updated_at"] = doc["updated_at"].isoformat()
+        
+        return docs
     
-    def delete_document(self, doc_id: int):
+    def delete_document(self, doc_id: str):
         """Supprime un document"""
-        conn = self.get_connection()
-        cursor = conn.cursor()
-        cursor.execute("DELETE FROM documents WHERE id = ?", (doc_id,))
-        conn.commit()
-        conn.close()
+        from bson.objectid import ObjectId
+        
+        try:
+            self.documents.delete_one({"_id": ObjectId(doc_id)})
+        except Exception as e:
+            print(f"Erreur suppression document: {e}")
     
-    def update_document_status(self, doc_id: int, status: str):
+    def update_document_status(self, doc_id: str, status: str):
         """Met à jour le statut d'un document"""
-        conn = self.get_connection()
-        cursor = conn.cursor()
-        cursor.execute(
-            "UPDATE documents SET status = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
-            (status, doc_id)
-        )
-        conn.commit()
-        conn.close()
+        from bson.objectid import ObjectId
+        
+        try:
+            self.documents.update_one(
+                {"_id": ObjectId(doc_id)},
+                {
+                    "$set": {
+                        "status": status,
+                        "updated_at": datetime.utcnow()
+                    }
+                }
+            )
+        except Exception as e:
+            print(f"Erreur mise à jour document: {e}")
     
     # Gestion des conversations
     def create_conversation(self, conversation_id: str, user_type: str = "student"):
         """Crée une nouvelle conversation"""
-        conn = self.get_connection()
-        cursor = conn.cursor()
-        
-        cursor.execute(
-            "INSERT INTO conversations (conversation_id, user_type) VALUES (?, ?)",
-            (conversation_id, user_type)
-        )
-        conn.commit()
-        conn.close()
+        try:
+            self.conversations.insert_one({
+                "conversation_id": conversation_id,
+                "user_type": user_type,
+                "created_at": datetime.utcnow(),
+                "last_activity": datetime.utcnow()
+            })
+        except Exception as e:
+            print(f"Info conversation: {e}")
     
     def add_message(self, conversation_id: str, role: str, content: str):
         """Ajoute un message à une conversation"""
-        conn = self.get_connection()
-        cursor = conn.cursor()
-        
         # Vérifier si la conversation existe
-        cursor.execute("SELECT * FROM conversations WHERE conversation_id = ?", (conversation_id,))
-        if cursor.fetchone() is None:
+        conversation = self.conversations.find_one({"conversation_id": conversation_id})
+        if conversation is None:
             self.create_conversation(conversation_id)
         
-        cursor.execute(
-            "INSERT INTO messages (conversation_id, role, content) VALUES (?, ?, ?)",
-            (conversation_id, role, content)
-        )
+        # Ajouter le message
+        self.messages.insert_one({
+            "conversation_id": conversation_id,
+            "role": role,
+            "content": content,
+            "created_at": datetime.utcnow()
+        })
         
         # Mettre à jour last_activity
-        cursor.execute(
-            "UPDATE conversations SET last_activity = CURRENT_TIMESTAMP WHERE conversation_id = ?",
-            (conversation_id,)
+        self.conversations.update_one(
+            {"conversation_id": conversation_id},
+            {"$set": {"last_activity": datetime.utcnow()}}
         )
-        
-        conn.commit()
-        conn.close()
     
     def get_conversation_history(self, conversation_id: str) -> List[Dict]:
         """Récupère l'historique d'une conversation"""
-        conn = self.get_connection()
-        cursor = conn.cursor()
-        cursor.execute(
-            "SELECT * FROM messages WHERE conversation_id = ? ORDER BY created_at",
-            (conversation_id,)
+        messages = list(
+            self.messages.find({"conversation_id": conversation_id})
+            .sort("created_at", 1)
         )
-        rows = cursor.fetchall()
-        conn.close()
         
-        return [dict(row) for row in rows]
+        for msg in messages:
+            msg["id"] = str(msg["_id"])
+            msg["created_at"] = msg["created_at"].isoformat()
+        
+        return messages
     
     # Statistiques
     def count_documents(self) -> int:
         """Compte le nombre de documents"""
-        conn = self.get_connection()
-        cursor = conn.cursor()
-        cursor.execute("SELECT COUNT(*) as count FROM documents")
-        count = cursor.fetchone()["count"]
-        conn.close()
-        return count
+        return self.documents.count_documents({})
     
     def count_questions(self) -> int:
         """Compte le nombre de questions posées"""
-        conn = self.get_connection()
-        cursor = conn.cursor()
-        cursor.execute("SELECT COUNT(*) as count FROM messages WHERE role = 'user'")
-        count = cursor.fetchone()["count"]
-        conn.close()
-        return count
+        return self.messages.count_documents({"role": "user"})
     
     def count_active_conversations(self) -> int:
         """Compte le nombre de conversations actives (dernières 24h)"""
-        conn = self.get_connection()
-        cursor = conn.cursor()
-        cursor.execute(
-            """SELECT COUNT(*) as count FROM conversations 
-               WHERE last_activity > datetime('now', '-1 day')"""
-        )
-        count = cursor.fetchone()["count"]
-        conn.close()
-        return count
+        yesterday = datetime.utcnow() - timedelta(days=1)
+        return self.conversations.count_documents({
+            "last_activity": {"$gt": yesterday}
+        })
+    
+    def close(self):
+        """Ferme la connexion MongoDB"""
+        self.client.close()

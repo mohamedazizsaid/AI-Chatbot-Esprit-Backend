@@ -9,7 +9,7 @@ from datetime import datetime
 
 from chatbot import ChatbotRAG
 from document_processor import DocumentProcessor
-from auth import get_current_user, create_access_token, verify_password, get_password_hash
+from auth import get_current_user, verify_password, get_password_hash
 from database import Database
 
 app = FastAPI(title="Chatbot Faculté API")
@@ -41,7 +41,7 @@ class LoginRequest(BaseModel):
     password: str
 
 class DocumentInfo(BaseModel):
-    id: int
+    id: str  # Changé de int à str pour MongoDB
     filename: str
     file_type: str
     upload_date: str
@@ -50,12 +50,29 @@ class DocumentInfo(BaseModel):
 # Routes d'authentification
 @app.post("/api/auth/login")
 async def login(request: LoginRequest):
+    print(f"=== Tentative de connexion ===")
+    print(f"Username: {request.username}")
+    
     user = db.get_user(request.username)
-    if not user or not verify_password(request.password, user["password_hash"]):
+    print(f"Utilisateur trouvé: {user is not None}")
+    
+    if not user:
+        print("❌ Utilisateur non trouvé")
         raise HTTPException(status_code=401, detail="Identifiants incorrects")
     
-    access_token = create_access_token(data={"sub": user["username"], "role": user["role"]})
-    return {"access_token": access_token, "token_type": "bearer", "role": user["role"]}
+    password_valid = verify_password(request.password, user["password_hash"])
+    print(f"Mot de passe valide: {password_valid}")
+    
+    if not password_valid:
+        print("❌ Mot de passe incorrect")
+        raise HTTPException(status_code=401, detail="Identifiants incorrects")
+    
+    print("✅ Connexion réussie")
+    return {
+        "message": "Connexion réussie",
+        "username": user["username"],
+        "role": user["role"]
+    }
 
 # Routes publiques (Étudiant/Parent)
 @app.post("/api/chat")
@@ -77,16 +94,13 @@ async def get_chat_history(conversation_id: str):
     history = db.get_conversation_history(conversation_id)
     return {"history": history}
 
-# Routes Admin (protégées)
+# Routes Admin (certaines maintenant publiques)
+
 @app.post("/api/admin/documents/upload")
 async def upload_document(
-    file: UploadFile = File(...),
-    current_user: dict = Depends(get_current_user)
+    file: UploadFile = File(...)
 ):
-    """Upload et traitement d'un document"""
-    if current_user["role"] != "admin":
-        raise HTTPException(status_code=403, detail="Accès refusé")
-    
+    """Upload et traitement d'un document - SANS AUTH"""
     try:
         # Sauvegarder le fichier
         file_path = os.path.join(UPLOAD_DIR, file.filename)
@@ -114,19 +128,16 @@ async def upload_document(
         }
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Erreur: {str(e)}")
-
-@app.get("/api/admin/documents")
-async def list_documents(current_user: dict = Depends(get_current_user)):
-    """Liste tous les documents"""
-    if current_user["role"] != "admin":
-        raise HTTPException(status_code=403, detail="Accès refusé")
     
+@app.get("/api/admin/documents")
+async def list_documents():
+    """Liste tous les documents - SANS AUTH"""
     documents = db.get_all_documents()
     return {"documents": documents}
 
 @app.delete("/api/admin/documents/{document_id}")
 async def delete_document(
-    document_id: int,
+    document_id: str,  # Changé de int à str pour MongoDB
     current_user: dict = Depends(get_current_user)
 ):
     """Supprimer un document"""
@@ -151,7 +162,7 @@ async def delete_document(
 
 @app.put("/api/admin/documents/{document_id}/reprocess")
 async def reprocess_document(
-    document_id: int,
+    document_id: str,  # Changé de int à str pour MongoDB
     current_user: dict = Depends(get_current_user)
 ):
     """Retraiter un document"""
@@ -175,18 +186,14 @@ async def reprocess_document(
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/api/admin/stats")
-async def get_stats(current_user: dict = Depends(get_current_user)):
-    """Statistiques du système"""
-    if current_user["role"] != "admin":
-        raise HTTPException(status_code=403, detail="Accès refusé")
-    
+async def get_stats():
+    """Statistiques du système - SANS AUTH"""
     stats = {
         "total_documents": db.count_documents(),
         "total_questions": db.count_questions(),
         "active_conversations": db.count_active_conversations()
     }
     return stats
-
 @app.get("/")
 async def root():
     return {"message": "Chatbot Faculté API - Opérationnelle"}
